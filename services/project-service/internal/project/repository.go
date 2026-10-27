@@ -36,3 +36,16 @@ func (r *Repository) Create(ctx context.Context, name string) (Project, error) {
 
 	return project, nil
 }
+
+func (r *Repository) ExistsById(ctx context.Context, id string) (bool, error) {
+	var exists bool
+
+	err := r.db.QueryRow(ctx, 
+	`SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1)`, id).Scan(&exists)
+
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}

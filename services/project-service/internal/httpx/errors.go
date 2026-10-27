@@ -3,6 +3,7 @@ package httpx
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"example.com/trest/services/project-service/internal/apperror"
@@ -21,6 +22,8 @@ func WriteError(w http.ResponseWriter, err error) {
 	var appErr *apperror.AppError
 
 	if !errors.As(err, &appErr) {
+		slog.Error("Unhandled request error", "error", err)
+
 		writeJSONError(
 			w,
 			http.StatusInternalServerError,

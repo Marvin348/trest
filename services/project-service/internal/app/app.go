@@ -37,7 +37,7 @@ func Run() error {
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	registerRoutes(mux, pool)
+	RegisterRoutes(mux, pool)
 
 	slog.Info("Project Service starting", "port", 8080)
 

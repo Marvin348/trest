@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func registerRoutes(mux *http.ServeMux, pool *pgxpool.Pool) {
+func RegisterRoutes(mux *http.ServeMux, pool *pgxpool.Pool) {
 	registerProjectRoutes(mux, pool)
 	registerApplicationRoutes(mux, pool)
 }

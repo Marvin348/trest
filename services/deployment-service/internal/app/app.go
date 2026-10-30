@@ -41,3 +41,10 @@ func Run() error {
 
 	return http.ListenAndServe(":8090", mux)
 }
+
+
+// Event-Driven Architecture: Service A wirft eine Nachricht in eine Warteschlange und arbeitet sofort weiter.
+// - Apache Kafka: Der Industriestandard für Event-Streaming und extrem große Datenmengen. Services kommunizieren, indem sie "Events" (z. B. BestellungAbgeschlossen) in Kafka-Topics schreiben, die andere Services abonnieren.
+// - RabbitMQ / NATS: Sehr beliebte, klassische Message Broker. NATS ist in der Go-Welt besonders beliebt, weil es extrem leichtgewichtig, in Go geschrieben und unglaublich schnell für Publish/Subscribe-Muster ist.
+
+// Das wäre doch was für mich oder?

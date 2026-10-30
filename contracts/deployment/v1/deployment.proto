@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package trest.deployment.v1;
+
+option go_package = "example.com/trest/contracts/deployment/v1;deploymentv1";
+
+service DeploymentService {
+  rpc CreateDeployment(CreateDeploymentRequest)
+      returns (CreateDeploymentResponse);
+}
+
+message CreateDeploymentRequest {
+  string request_id = 1;
+  string application_id = 2;
+  string project_id = 3;
+  string image = 4;
+
+  int32 replicas = 5;
+  int32 container_port = 6;
+
+  int32 cpu_request_m = 7;
+  int32 cpu_limit_m = 8;
+
+  int32 memory_request_mi = 9;
+  int32 memory_limit_mi = 10;
+
+  map<string, string> environment = 11;
+}
+
+message CreateDeploymentResponse {
+  string deployment_id = 1;
+  string status = 2;
+}

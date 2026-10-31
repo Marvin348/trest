@@ -5,3 +5,5 @@ use (
 	./services/deployment-service
 	./services/project-service
 )
+
+replace example.com/trest/contracts v0.0.0 => ./contracts

@@ -14,3 +14,7 @@ dist/
 coverage/
 *.test
 *.out
+
+# Local Go diagnostics
+/diagnose.work
+/diagnose.work.sum

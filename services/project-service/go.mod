@@ -3,6 +3,7 @@ module example.com/trest/services/project-service
 go 1.27.2
 
 require (
+	github.com/Marvin348/trest/packages/secretcrypto v0.0.0
 	github.com/go-playground/validator/v10 v10.30.5
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/jackc/pgx/v5 v5.11.0
@@ -71,3 +72,5 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
+
+replace github.com/Marvin348/trest/packages/secretcrypto => ../../packages/secretcrypto

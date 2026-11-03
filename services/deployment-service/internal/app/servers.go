@@ -11,10 +11,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"example.com/trest/services/deployment-service/internal/deployment"
 )
 
-func runServers() error {
-	grpcServer, listener, err := newGRPCServer(":50051")
+func runServers(service *deployment.Service) error {
+	grpcServer, listener, err := newGRPCServer(":50051", service)
 	if err != nil {
 		return fmt.Errorf("initialize gRPC server: %w", err)
 	}

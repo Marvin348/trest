@@ -2,10 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"errors"
 
+	"example.com/trest/services/deployment-service/internal/deployment"
 	"example.com/trest/services/deployment-service/internal/platform/postgres"
 	"github.com/joho/godotenv"
 )
@@ -28,5 +29,8 @@ func Run() error {
 	}
 	defer pool.Close()
 
-	return runServers()
+	repository := deployment.NewRepository(pool)
+	service := deployment.NewService(repository)
+
+	return runServers(service)
 }

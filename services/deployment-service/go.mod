@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	example.com/trest/contracts v0.0.0
+	github.com/Marvin348/trest/packages/secretcrypto v0.0.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/joho/godotenv v1.5.1
 	google.golang.org/grpc v1.85.0
@@ -22,3 +23,5 @@ require (
 )
 
 replace example.com/trest/contracts => ../../contracts
+
+replace github.com/Marvin348/trest/packages/secretcrypto => ../../packages/secretcrypto

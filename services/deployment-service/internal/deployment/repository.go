@@ -23,13 +23,13 @@ func (r *Repository) Create(ctx context.Context, data CreateDeploymentParams) (D
 	const query = `
 		INSERT INTO deployments (request_id, project_id, application_id, image, 
 			replicas, container_port, cpu_request_m, cpu_limit_m, memory_request_mi, 
-			memory_limit_mi, environment
+			memory_limit_mi
 		)
-		VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (request_id) DO NOTHING
 		RETURNING id, request_id, project_id, application_id, image, replicas, container_port,
 				  cpu_request_m, cpu_limit_m, memory_request_mi, memory_limit_mi,
-				  environment, status, created_at, updated_at
+				  status, created_at, updated_at
 		`
 
 	var deployment Deployment
@@ -45,7 +45,6 @@ func (r *Repository) Create(ctx context.Context, data CreateDeploymentParams) (D
 		data.CPULimitM,
 		data.MemoryRequestMi,
 		data.MemoryLimitMi,
-		data.Environment,
 	).Scan(
 		&deployment.ID,
 		&deployment.RequestID,
@@ -58,7 +57,6 @@ func (r *Repository) Create(ctx context.Context, data CreateDeploymentParams) (D
 		&deployment.CPULimitM,
 		&deployment.MemoryRequestMi,
 		&deployment.MemoryLimitMi,
-		&deployment.Environment,
 		&deployment.Status,
 		&deployment.CreatedAt,
 		&deployment.UpdatedAt,

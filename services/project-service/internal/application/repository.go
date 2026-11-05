@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"uuid"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -79,4 +81,44 @@ func (r *Repository) Create(ctx context.Context, data CreateApplicationData) (Ap
 	}
 
 	return application, nil
+}
+
+func (r *Repository) FindDeployConfigByID(
+	ctx context.Context,
+	id uuid.UUID,
+) (ApplicationDeployConfig, error) {
+
+	const query = `
+		SELECT id, project_id, image, replicas, cpu_request_m, cpu_limit_m,
+			   memory_request_mi, memory_limit_mi, container_port
+		FROM applications
+		WHERE id = $1
+	`
+
+	var app ApplicationDeployConfig
+
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&app.ID,
+		&app.ProjectID,
+		&app.Image,
+		&app.Replicas,
+		&app.CPURequestM,
+		&app.CPULimitM,
+		&app.MemoryRequestMi,
+		&app.MemoryLimitMi,
+		&app.ContainerPort,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ApplicationDeployConfig{}, fmt.Errorf(
+				"application %s: %w", id, ErrNotFound)
+		}
+		return ApplicationDeployConfig{}, fmt.Errorf(
+			"find application by id: %w",
+			err,
+		)
+	}
+
+	return app, nil
 }

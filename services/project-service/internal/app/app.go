@@ -8,6 +8,8 @@ import (
 	"os"
 
 	"errors"
+
+	"example.com/trest/services/project-service/internal/platform/deploymentgrpc"
 	"example.com/trest/services/project-service/internal/platform/postgres"
 	"github.com/joho/godotenv"
 )
@@ -37,7 +39,16 @@ func Run() error {
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	RegisterRoutes(mux, pool)
+	client, conn, err := deploymentgrpc.NewClient("localhost:50051")
+	if err != nil {
+		return fmt.Errorf("create deployment grpc client: %w", err)
+	}
+	defer conn.Close()
+
+	RegisterRoutes(mux, Dependencies{
+		DB:               pool,
+		DeploymentClient: client,
+	})
 
 	slog.Info("Project Service starting", "port", 8080)
 

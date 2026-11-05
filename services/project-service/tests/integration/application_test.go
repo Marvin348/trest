@@ -306,7 +306,10 @@ func TestCreateApplicationReturnsNotFoundForUnknownProject(t *testing.T) {
 
 func newTestRouter() *http.ServeMux {
 	mux := http.NewServeMux()
-	app.RegisterRoutes(mux, testDB)
+	app.RegisterRoutes(mux, app.Dependencies{
+		DB:               testDB,
+		DeploymentClient: testDeploymentClient,
+	})
 	return mux
 }
 

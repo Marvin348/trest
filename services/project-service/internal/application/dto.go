@@ -1,5 +1,7 @@
 package application
 
+import "uuid"
+
 type CreateApplicationRequest struct {
 	Name          string `json:"name" validate:"required,min=3,max=50"`
 	Image         string `json:"image" validate:"required"`
@@ -26,4 +28,18 @@ type CreateApplicationData struct {
 	CPULimitM       int
 	MemoryRequestMi int
 	MemoryLimitMi   int
+}
+
+type ApplicationDeployConfig struct {
+	ID        uuid.UUID
+	ProjectID uuid.UUID
+
+	Image         string
+	Replicas      int32
+	ContainerPort int32
+
+	CPURequestM     int32
+	CPULimitM       int32
+	MemoryRequestMi int32
+	MemoryLimitMi   int32
 }

@@ -64,14 +64,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ContainerPort: input.ContainerPort,
 	}
 
-	applicaton, err := h.service.Create(r.Context(), params)
+	application, err := h.service.Create(r.Context(), params)
 
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 
-	if err := httpx.WriteJSON(w, http.StatusCreated, applicaton); err != nil {
+	if err := httpx.WriteJSON(w, http.StatusCreated, application); err != nil {
 		slog.Error("send applicaton response", "error", err)
 	}
 }

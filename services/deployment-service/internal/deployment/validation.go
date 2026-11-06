@@ -1,10 +1,13 @@
 package deployment
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func validateCreateDeploymentParams(params CreateDeploymentParams) error {
 
-	if params.Image == "" {
+	if strings.TrimSpace(params.Image) == "" {
 		return fmt.Errorf("image cannot be empty: %w", ErrInvalidDeployment)
 	}
 

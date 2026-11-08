@@ -5,8 +5,10 @@ import (
 
 	deploymentv1 "example.com/trest/contracts/deployment/v1"
 	"example.com/trest/services/deployment-service/internal/deployment"
+	"example.com/trest/services/deployment-service/internal/eventstore"
 
 	"errors"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -44,6 +46,12 @@ func (s *Server) CreateDeployment(
 
 		case errors.Is(err, context.DeadlineExceeded):
 			return nil, status.Error(codes.DeadlineExceeded, "deadline exceeded")
+
+		case errors.Is(err, eventstore.ErrConcurrencyConflict):
+			return nil, status.Error(
+				codes.Aborted,
+				"deployment was modified concurrently",
+			)
 
 		case errors.Is(err, deployment.ErrIdempotencyConflict):
 			return nil, status.Error(codes.AlreadyExists,

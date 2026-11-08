@@ -18,14 +18,16 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) Create(ctx context.Context, data CreateDeploymentParams) (Deployment, error) {
+func (r *Repository) CreateWithTx(ctx context.Context, tx pgx.Tx,
+	data CreateDeploymentParams,
+	deploymentID uuid.UUID) (Deployment, error) {
 
 	const query = `
-		INSERT INTO deployments (request_id, project_id, application_id, image, 
+		INSERT INTO deployments (id, request_id, project_id, application_id, image, 
 			replicas, container_port, cpu_request_m, cpu_limit_m, memory_request_mi, 
 			memory_limit_mi
 		)
-		VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (request_id) DO NOTHING
 		RETURNING id, request_id, project_id, application_id, image, replicas, container_port,
 				  cpu_request_m, cpu_limit_m, memory_request_mi, memory_limit_mi,
@@ -34,7 +36,8 @@ func (r *Repository) Create(ctx context.Context, data CreateDeploymentParams) (D
 
 	var deployment Deployment
 
-	err := r.db.QueryRow(ctx, query,
+	err := tx.QueryRow(ctx, query,
+		deploymentID,
 		data.RequestID,
 		data.ProjectID,
 		data.ApplicationID,
@@ -73,7 +76,8 @@ func (r *Repository) Create(ctx context.Context, data CreateDeploymentParams) (D
 	return deployment, nil
 }
 
-func (r *Repository) GetByRequestID(ctx context.Context, requestID uuid.UUID) (Deployment, error) {
+func (r *Repository) GetByRequestID(ctx context.Context,
+	requestID uuid.UUID) (Deployment, error) {
 
 	const query = `
 		SELECT id, request_id, project_id, application_id, image, replicas, container_port,
@@ -109,6 +113,48 @@ func (r *Repository) GetByRequestID(ctx context.Context, requestID uuid.UUID) (D
 		}
 
 		return Deployment{}, fmt.Errorf("failed to get deployment by request id: %w", err)
+	}
+
+	return deployment, nil
+}
+
+func (r *Repository) GetByID(ctx context.Context,
+	deploymentID uuid.UUID) (Deployment, error) {
+
+	const query = `
+		SELECT id, request_id, project_id, application_id, image, replicas, container_port,
+				  cpu_request_m, cpu_limit_m, memory_request_mi, memory_limit_mi,
+				  environment, status, created_at, updated_at
+		FROM deployments
+		WHERE id = $1
+	`
+
+	var deployment Deployment
+
+	err := r.db.QueryRow(ctx, query, deploymentID).Scan(
+		&deployment.ID,
+		&deployment.RequestID,
+		&deployment.ProjectID,
+		&deployment.ApplicationID,
+		&deployment.Image,
+		&deployment.Replicas,
+		&deployment.ContainerPort,
+		&deployment.CPURequestM,
+		&deployment.CPULimitM,
+		&deployment.MemoryRequestMi,
+		&deployment.MemoryLimitMi,
+		&deployment.Environment,
+		&deployment.Status,
+		&deployment.CreatedAt,
+		&deployment.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Deployment{}, ErrNotFound
+		}
+
+		return Deployment{}, fmt.Errorf("failed to get deployment by id: %w", err)
 	}
 
 	return deployment, nil

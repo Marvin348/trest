@@ -1,42 +1,118 @@
 package deployment
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"uuid"
+
+	"example.com/trest/services/deployment-service/internal/eventstore"
+	"example.com/trest/services/deployment-service/internal/idempotency"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Service struct {
-	repo *Repository
+	db              *pgxpool.Pool
+	repo            *Repository
+	eventRepo       *eventstore.Repository
+	idempotencyRepo *idempotency.Repository
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(
+	db *pgxpool.Pool,
+	repo *Repository,
+	eventRepo *eventstore.Repository,
+	idempotencyRepo *idempotency.Repository,
+) *Service {
+	return &Service{
+		db:              db,
+		repo:            repo,
+		eventRepo:       eventRepo,
+		idempotencyRepo: idempotencyRepo,
+	}
 }
 
-func (s *Service) Create(ctx context.Context, params CreateDeploymentParams) (Deployment, error) {
+func (s *Service) Create(ctx context.Context,
+	params CreateDeploymentParams) (Deployment, error) {
 
 	if err := validateCreateDeploymentParams(params); err != nil {
 		return Deployment{}, err
 	}
 
-	created, err := s.repo.Create(ctx, params)
+	deploymentID := uuid.New()
+	payload, err := json.Marshal(newDeploymentCreatedPayload(params))
+	if err != nil {
+		return Deployment{}, fmt.Errorf("marshal deployment created payload: %w", err)
+	}
 
-	if errors.Is(err, ErrAlreadyExists) {
-		existing, err := s.repo.GetByRequestID(ctx, params.RequestID)
+	fingerprint, err := fingerprintCreateDeployment(params)
+	if err != nil {
+		return Deployment{}, fmt.Errorf("fingerprint deployment request: %w", err)
+	}
+
+	event := eventstore.Event{
+		DeploymentID:  deploymentID,
+		Type:          string(DeploymentCreated),
+		Version:       1,
+		SchemaVersion: 1,
+		Payload:       payload,
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return Deployment{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	err = s.idempotencyRepo.Claim(ctx, tx, idempotency.ProcessedRequest{
+		Operation:    "deployment.create",
+		RequestID:    params.RequestID,
+		DeploymentID: deploymentID,
+		Fingerprint:  fingerprint,
+	})
+
+	if errors.Is(err, idempotency.ErrAlreadyProcessed) {
+		if err := tx.Rollback(ctx); err != nil {
+			return Deployment{}, fmt.Errorf("rollback duplicate deployment: %w", err)
+		}
+
+		existing, err := s.idempotencyRepo.GetByRequestID(ctx,
+			"deployment.create", params.RequestID)
+
+		if err != nil {
+			return Deployment{}, fmt.Errorf("get existing request: %w", err)
+		}
+
+		if !bytes.Equal(existing.Fingerprint, fingerprint) {
+			return Deployment{}, ErrIdempotencyConflict
+		}
+
+		deployment, err := s.repo.GetByID(ctx, existing.DeploymentID)
 		if err != nil {
 			return Deployment{}, fmt.Errorf("get existing deployment: %w", err)
 		}
 
-		if !sameDeploymentRequest(existing, params) {
-			return Deployment{}, ErrIdempotencyConflict
-		}
-
-		return existing, nil
+		return deployment, nil
 	}
 
 	if err != nil {
+		return Deployment{}, fmt.Errorf("claim idempotency key: %w", err)
+	}
+
+	if err := s.eventRepo.Append(ctx, tx, event); err != nil {
+		return Deployment{}, err
+	}
+
+	created, err := s.repo.CreateWithTx(ctx, tx, params, deploymentID)
+
+	if err != nil {
 		return Deployment{}, fmt.Errorf("create deployment: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Deployment{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	return created, nil

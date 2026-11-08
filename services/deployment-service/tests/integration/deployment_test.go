@@ -2,12 +2,14 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
 	"uuid"
 
 	deploymentv1 "example.com/trest/contracts/deployment/v1"
+	"example.com/trest/services/deployment-service/internal/deployment"
 	"example.com/trest/services/deployment-service/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -29,6 +31,22 @@ type savedDeployment struct {
 	MemoryRequestMi int32
 	MemoryLimitMi   int32
 	Status          string
+}
+
+type savedEvent struct {
+	ID            uuid.UUID
+	DeploymentID  uuid.UUID
+	Version       int64
+	Type          string
+	SchemaVersion int
+	Payload       json.RawMessage
+}
+
+type savedProcessedRequest struct {
+	Operation    string
+	RequestID    uuid.UUID
+	DeploymentID uuid.UUID
+	Fingerprint  []byte
 }
 
 func TestCreateDeployment(t *testing.T) {
@@ -58,7 +76,33 @@ func TestCreateDeployment(t *testing.T) {
 	require.Equal(t, request.GetMemoryRequestMi(), saved.MemoryRequestMi)
 	require.Equal(t, request.GetMemoryLimitMi(), saved.MemoryLimitMi)
 	require.Equal(t, response.GetStatus(), saved.Status)
-	require.Equal(t, 1, deploymentCount(t))
+
+	event := findEventByDeploymentID(t, deploymentID)
+	require.NotEqual(t, uuid.Nil(), event.ID)
+	require.Equal(t, deploymentID, event.DeploymentID)
+	require.Equal(t, int64(1), event.Version)
+	require.Equal(t, "DeploymentCreated", event.Type)
+	require.Equal(t, 1, event.SchemaVersion)
+
+	var payload deployment.DeploymentCreatedPayload
+	require.NoError(t, json.Unmarshal(event.Payload, &payload))
+	require.Equal(t, uuid.MustParse(request.GetRequestId()), payload.RequestID)
+	require.Equal(t, uuid.MustParse(request.GetProjectId()), payload.ProjectID)
+	require.Equal(t, uuid.MustParse(request.GetApplicationId()), payload.ApplicationID)
+	require.Equal(t, request.GetImage(), payload.Image)
+	require.Equal(t, request.GetReplicas(), payload.Replicas)
+	require.Equal(t, request.GetContainerPort(), payload.ContainerPort)
+	require.Equal(t, request.GetCpuRequestM(), payload.CPURequestM)
+	require.Equal(t, request.GetCpuLimitM(), payload.CPULimitM)
+	require.Equal(t, request.GetMemoryRequestMi(), payload.MemoryRequestMi)
+	require.Equal(t, request.GetMemoryLimitMi(), payload.MemoryLimitMi)
+
+	processed := findProcessedRequest(t, request.GetRequestId())
+	require.Equal(t, "deployment.create", processed.Operation)
+	require.Equal(t, uuid.MustParse(request.GetRequestId()), processed.RequestID)
+	require.Equal(t, deploymentID, processed.DeploymentID)
+	require.Len(t, processed.Fingerprint, 32)
+	assertWriteModelCounts(t, 1)
 }
 
 func TestCreateDeploymentAcceptsBoundaryValues(t *testing.T) {
@@ -95,7 +139,7 @@ func TestCreateDeploymentAcceptsBoundaryValues(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, "QUEUED", response.GetStatus())
-			require.Equal(t, 1, deploymentCount(t))
+			assertWriteModelCounts(t, 1)
 		})
 	}
 }
@@ -274,7 +318,7 @@ func TestCreateDeploymentRejectsInvalidRequest(t *testing.T) {
 			require.Nil(t, response)
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
 			require.Equal(t, testCase.expectedMessage, status.Convert(err).Message())
-			require.Equal(t, 0, deploymentCount(t))
+			assertWriteModelCounts(t, 0)
 		})
 	}
 }
@@ -290,7 +334,7 @@ func TestCreateDeploymentIsIdempotent(t *testing.T) {
 	require.NoError(t, firstErr)
 	require.NoError(t, secondErr)
 	require.Equal(t, first, second)
-	require.Equal(t, 1, deploymentCount(t))
+	assertWriteModelCounts(t, 1)
 }
 
 func TestCreateDeploymentRejectsIdempotencyConflict(t *testing.T) {
@@ -379,7 +423,7 @@ func TestCreateDeploymentRejectsIdempotencyConflict(t *testing.T) {
 				firstRequest.GetImage(),
 				findDeploymentByRequestID(t, firstRequest.GetRequestId()).Image,
 			)
-			require.Equal(t, 1, deploymentCount(t))
+			assertWriteModelCounts(t, 1)
 		})
 	}
 }
@@ -397,7 +441,7 @@ func TestCreateDeploymentCreatesIndependentDeployments(t *testing.T) {
 	require.NoError(t, firstErr)
 	require.NoError(t, secondErr)
 	require.NotEqual(t, first.GetDeploymentId(), second.GetDeploymentId())
-	require.Equal(t, 2, deploymentCount(t))
+	assertWriteModelCounts(t, 2)
 }
 
 func TestCreateDeploymentHandlesConcurrentIdenticalRequests(t *testing.T) {
@@ -431,7 +475,7 @@ func TestCreateDeploymentHandlesConcurrentIdenticalRequests(t *testing.T) {
 		require.NotNil(t, responses[index], "request %d", index)
 		require.Equal(t, responses[0], responses[index], "request %d", index)
 	}
-	require.Equal(t, 1, deploymentCount(t))
+	assertWriteModelCounts(t, 1)
 }
 
 func TestCreateDeploymentHandlesConcurrentConflictingRequests(t *testing.T) {
@@ -486,7 +530,44 @@ func TestCreateDeploymentHandlesConcurrentConflictingRequests(t *testing.T) {
 		requests[successIndex].GetImage(),
 		findDeploymentByRequestID(t, requests[successIndex].GetRequestId()).Image,
 	)
-	require.Equal(t, 1, deploymentCount(t))
+	assertWriteModelCounts(t, 1)
+}
+
+func TestCreateDeploymentRollsBackEventAndIdempotencyClaimWhenProjectionFails(
+	t *testing.T,
+) {
+	testutil.ResetDB(t, testDB)
+
+	const (
+		constraintName = "chk_deployments_integration_forced_failure"
+		failureImage   = "integration-force-projection-failure"
+	)
+
+	_, err := testDB.Exec(
+		context.Background(),
+		`ALTER TABLE deployments
+		 ADD CONSTRAINT `+constraintName+`
+		 CHECK (image <> '`+failureImage+`')`,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, cleanupErr := testDB.Exec(
+			context.Background(),
+			"ALTER TABLE deployments DROP CONSTRAINT IF EXISTS "+constraintName,
+		)
+		require.NoError(t, cleanupErr)
+	})
+
+	client := startTestGRPCServer(t)
+	request := validCreateDeploymentRequest()
+	request.Image = failureImage
+
+	response, requestErr := callCreateDeployment(t, client, request)
+
+	require.Nil(t, response)
+	require.Equal(t, codes.Internal, status.Code(requestErr))
+	require.Equal(t, "failed to create deployment", status.Convert(requestErr).Message())
+	assertWriteModelCounts(t, 0)
 }
 
 func validCreateDeploymentRequest() *deploymentv1.CreateDeploymentRequest {
@@ -548,6 +629,59 @@ func findDeploymentByRequestID(t *testing.T, requestID string) savedDeployment {
 	return saved
 }
 
+func findEventByDeploymentID(t *testing.T, deploymentID uuid.UUID) savedEvent {
+	t.Helper()
+
+	var saved savedEvent
+	err := testDB.QueryRow(
+		context.Background(),
+		`SELECT id, deployment_id, version, type, schema_version, payload
+		 FROM deployment_events
+		 WHERE deployment_id = $1`,
+		deploymentID,
+	).Scan(
+		&saved.ID,
+		&saved.DeploymentID,
+		&saved.Version,
+		&saved.Type,
+		&saved.SchemaVersion,
+		&saved.Payload,
+	)
+	require.NoError(t, err)
+
+	return saved
+}
+
+func findProcessedRequest(t *testing.T, requestID string) savedProcessedRequest {
+	t.Helper()
+
+	var saved savedProcessedRequest
+	err := testDB.QueryRow(
+		context.Background(),
+		`SELECT operation, request_id, deployment_id, fingerprint
+		 FROM processed_requests
+		 WHERE operation = $1 AND request_id = $2`,
+		"deployment.create",
+		requestID,
+	).Scan(
+		&saved.Operation,
+		&saved.RequestID,
+		&saved.DeploymentID,
+		&saved.Fingerprint,
+	)
+	require.NoError(t, err)
+
+	return saved
+}
+
+func assertWriteModelCounts(t *testing.T, expected int) {
+	t.Helper()
+
+	require.Equal(t, expected, deploymentCount(t), "deployment projection count")
+	require.Equal(t, expected, eventCount(t), "deployment event count")
+	require.Equal(t, expected, processedRequestCount(t), "processed request count")
+}
+
 func deploymentCount(t *testing.T) int {
 	t.Helper()
 
@@ -555,6 +689,30 @@ func deploymentCount(t *testing.T) int {
 	require.NoError(t, testDB.QueryRow(
 		context.Background(),
 		"SELECT COUNT(*) FROM deployments",
+	).Scan(&count))
+
+	return count
+}
+
+func eventCount(t *testing.T) int {
+	t.Helper()
+
+	var count int
+	require.NoError(t, testDB.QueryRow(
+		context.Background(),
+		"SELECT COUNT(*) FROM deployment_events",
+	).Scan(&count))
+
+	return count
+}
+
+func processedRequestCount(t *testing.T) int {
+	t.Helper()
+
+	var count int
+	require.NoError(t, testDB.QueryRow(
+		context.Background(),
+		"SELECT COUNT(*) FROM processed_requests",
 	).Scan(&count))
 
 	return count

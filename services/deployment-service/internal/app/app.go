@@ -7,6 +7,9 @@ import (
 	"os"
 
 	"example.com/trest/services/deployment-service/internal/deployment"
+	"example.com/trest/services/deployment-service/internal/eventstore"
+	"example.com/trest/services/deployment-service/internal/idempotency"
+
 	"example.com/trest/services/deployment-service/internal/platform/postgres"
 	"github.com/joho/godotenv"
 )
@@ -29,8 +32,16 @@ func Run() error {
 	}
 	defer pool.Close()
 
+	idempotencyRepository := idempotency.NewRepository(pool)
 	repository := deployment.NewRepository(pool)
-	service := deployment.NewService(repository)
+	eventRepository := eventstore.NewRepository(pool)
+
+	service := deployment.NewService(
+		pool,
+		repository,
+		eventRepository,
+		idempotencyRepository,
+	)
 
 	return runServers(service)
 }

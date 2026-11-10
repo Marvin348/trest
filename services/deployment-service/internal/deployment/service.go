@@ -10,6 +10,7 @@ import (
 
 	"example.com/trest/services/deployment-service/internal/eventstore"
 	"example.com/trest/services/deployment-service/internal/idempotency"
+	"example.com/trest/services/deployment-service/internal/outbox"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,6 +19,7 @@ type Service struct {
 	repo            *Repository
 	eventRepo       *eventstore.Repository
 	idempotencyRepo *idempotency.Repository
+	outboxRepo      *outbox.Repository
 }
 
 func NewService(
@@ -25,12 +27,14 @@ func NewService(
 	repo *Repository,
 	eventRepo *eventstore.Repository,
 	idempotencyRepo *idempotency.Repository,
+	outboxRepo *outbox.Repository,
 ) *Service {
 	return &Service{
 		db:              db,
 		repo:            repo,
 		eventRepo:       eventRepo,
 		idempotencyRepo: idempotencyRepo,
+		outboxRepo:      outboxRepo,
 	}
 }
 
@@ -109,6 +113,23 @@ func (s *Service) Create(ctx context.Context,
 
 	if err != nil {
 		return Deployment{}, fmt.Errorf("create deployment: %w", err)
+	}
+
+	messagePayload, err := json.Marshal(
+		newDeploymentRequestedMessage(params, deploymentID),
+	)
+	if err != nil {
+		return Deployment{}, fmt.Errorf("marshal deployment requested message: %w", err)
+	}
+
+	err = s.outboxRepo.Insert(ctx, tx, outbox.Message{
+		Type:     "deployment.requested",
+		Payload:  messagePayload,
+		Status:   string(outbox.StatusPending),
+		Attempts: 0,
+	})
+	if err != nil {
+		return Deployment{}, fmt.Errorf("insert outbox message: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

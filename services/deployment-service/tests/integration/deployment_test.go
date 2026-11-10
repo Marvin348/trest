@@ -49,6 +49,15 @@ type savedProcessedRequest struct {
 	Fingerprint  []byte
 }
 
+type savedOutboxMessage struct {
+	ID          uuid.UUID
+	Type        string
+	Payload     json.RawMessage
+	Status      string
+	Attempts    int
+	PublishedAt *time.Time
+}
+
 func TestCreateDeployment(t *testing.T) {
 	testutil.ResetDB(t, testDB)
 	client := startTestGRPCServer(t)
@@ -102,6 +111,26 @@ func TestCreateDeployment(t *testing.T) {
 	require.Equal(t, uuid.MustParse(request.GetRequestId()), processed.RequestID)
 	require.Equal(t, deploymentID, processed.DeploymentID)
 	require.Len(t, processed.Fingerprint, 32)
+
+	outboxMessage := findOutboxMessageByDeploymentID(t, deploymentID)
+	require.NotEqual(t, uuid.Nil(), outboxMessage.ID)
+	require.Equal(t, "deployment.requested", outboxMessage.Type)
+	require.Equal(t, "pending", outboxMessage.Status)
+	require.Zero(t, outboxMessage.Attempts)
+	require.Nil(t, outboxMessage.PublishedAt)
+
+	var requested deployment.DeploymentRequestedMessage
+	require.NoError(t, json.Unmarshal(outboxMessage.Payload, &requested))
+	require.Equal(t, deploymentID, requested.DeploymentID)
+	require.Equal(t, uuid.MustParse(request.GetProjectId()), requested.ProjectID)
+	require.Equal(t, uuid.MustParse(request.GetApplicationId()), requested.ApplicationID)
+	require.Equal(t, request.GetImage(), requested.Image)
+	require.Equal(t, request.GetReplicas(), requested.Replicas)
+	require.Equal(t, request.GetContainerPort(), requested.ContainerPort)
+	require.Equal(t, request.GetCpuRequestM(), requested.CPURequestM)
+	require.Equal(t, request.GetCpuLimitM(), requested.CPULimitM)
+	require.Equal(t, request.GetMemoryRequestMi(), requested.MemoryRequestMi)
+	require.Equal(t, request.GetMemoryLimitMi(), requested.MemoryLimitMi)
 	assertWriteModelCounts(t, 1)
 }
 
@@ -570,6 +599,38 @@ func TestCreateDeploymentRollsBackEventAndIdempotencyClaimWhenProjectionFails(
 	assertWriteModelCounts(t, 0)
 }
 
+func TestCreateDeploymentRollsBackTransactionWhenOutboxInsertFails(t *testing.T) {
+	testutil.ResetDB(t, testDB)
+
+	const constraintName = "chk_outbox_integration_forced_failure"
+	_, err := testDB.Exec(
+		context.Background(),
+		`ALTER TABLE outbox_messages
+		 ADD CONSTRAINT `+constraintName+`
+		 CHECK (type <> 'deployment.requested')`,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, cleanupErr := testDB.Exec(
+			context.Background(),
+			"ALTER TABLE outbox_messages DROP CONSTRAINT IF EXISTS "+constraintName,
+		)
+		require.NoError(t, cleanupErr)
+	})
+
+	client := startTestGRPCServer(t)
+	response, requestErr := callCreateDeployment(
+		t,
+		client,
+		validCreateDeploymentRequest(),
+	)
+
+	require.Nil(t, response)
+	require.Equal(t, codes.Internal, status.Code(requestErr))
+	require.Equal(t, "failed to create deployment", status.Convert(requestErr).Message())
+	assertWriteModelCounts(t, 0)
+}
+
 func validCreateDeploymentRequest() *deploymentv1.CreateDeploymentRequest {
 	return &deploymentv1.CreateDeploymentRequest{
 		RequestId:       "11111111-1111-4111-8111-111111111111",
@@ -674,12 +735,39 @@ func findProcessedRequest(t *testing.T, requestID string) savedProcessedRequest 
 	return saved
 }
 
+func findOutboxMessageByDeploymentID(
+	t *testing.T,
+	deploymentID uuid.UUID,
+) savedOutboxMessage {
+	t.Helper()
+
+	var saved savedOutboxMessage
+	err := testDB.QueryRow(
+		context.Background(),
+		`SELECT id, type, payload, status, attempts, published_at
+		 FROM outbox_messages
+		 WHERE payload->>'deployment_id' = $1`,
+		deploymentID.String(),
+	).Scan(
+		&saved.ID,
+		&saved.Type,
+		&saved.Payload,
+		&saved.Status,
+		&saved.Attempts,
+		&saved.PublishedAt,
+	)
+	require.NoError(t, err)
+
+	return saved
+}
+
 func assertWriteModelCounts(t *testing.T, expected int) {
 	t.Helper()
 
 	require.Equal(t, expected, deploymentCount(t), "deployment projection count")
 	require.Equal(t, expected, eventCount(t), "deployment event count")
 	require.Equal(t, expected, processedRequestCount(t), "processed request count")
+	require.Equal(t, expected, outboxMessageCount(t), "outbox message count")
 }
 
 func deploymentCount(t *testing.T) int {
@@ -713,6 +801,18 @@ func processedRequestCount(t *testing.T) int {
 	require.NoError(t, testDB.QueryRow(
 		context.Background(),
 		"SELECT COUNT(*) FROM processed_requests",
+	).Scan(&count))
+
+	return count
+}
+
+func outboxMessageCount(t *testing.T) int {
+	t.Helper()
+
+	var count int
+	require.NoError(t, testDB.QueryRow(
+		context.Background(),
+		"SELECT COUNT(*) FROM outbox_messages",
 	).Scan(&count))
 
 	return count

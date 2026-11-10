@@ -9,6 +9,7 @@ import (
 	"example.com/trest/services/deployment-service/internal/deployment"
 	"example.com/trest/services/deployment-service/internal/eventstore"
 	"example.com/trest/services/deployment-service/internal/idempotency"
+	"example.com/trest/services/deployment-service/internal/outbox"
 
 	"example.com/trest/services/deployment-service/internal/platform/postgres"
 	"github.com/joho/godotenv"
@@ -35,12 +36,14 @@ func Run() error {
 	idempotencyRepository := idempotency.NewRepository(pool)
 	repository := deployment.NewRepository(pool)
 	eventRepository := eventstore.NewRepository(pool)
+	outboxRepo := outbox.NewRepository(pool)
 
 	service := deployment.NewService(
 		pool,
 		repository,
 		eventRepository,
 		idempotencyRepository,
+		outboxRepo,
 	)
 
 	return runServers(service)

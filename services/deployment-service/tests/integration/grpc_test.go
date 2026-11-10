@@ -12,6 +12,7 @@ import (
 	"example.com/trest/services/deployment-service/internal/deployment"
 	"example.com/trest/services/deployment-service/internal/eventstore"
 	"example.com/trest/services/deployment-service/internal/idempotency"
+	"example.com/trest/services/deployment-service/internal/outbox"
 	deploymentgrpc "example.com/trest/services/deployment-service/internal/transport/grpc"
 )
 
@@ -26,7 +27,8 @@ func startTestGRPCServer(
 	repo := deployment.NewRepository(testDB)
 	eventRepo := eventstore.NewRepository(testDB)
 	idempotencyRepo := idempotency.NewRepository(testDB)
-	service := deployment.NewService(testDB, repo, eventRepo, idempotencyRepo)
+	outboxRepo := outbox.NewRepository(testDB)
+	service := deployment.NewService(testDB, repo, eventRepo, idempotencyRepo, outboxRepo)
 	handler := deploymentgrpc.NewServer(service)
 
 	server := grpc.NewServer()

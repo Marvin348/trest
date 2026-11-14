@@ -2,8 +2,14 @@ services:
   postgres:
     container_name: trest-postgres
     image: postgres:17
-    env_file:
-      - ./deploy/.env
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      PROJECT_DB_PASSWORD: ${PROJECT_DB_PASSWORD:?PROJECT_DB_PASSWORD is required}
+      DEPLOYMENT_DB_PASSWORD: ${DEPLOYMENT_DB_PASSWORD:?DEPLOYMENT_DB_PASSWORD is required}
+
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:5432"
     volumes:
@@ -16,5 +22,22 @@ services:
       timeout: 3s
       retries: 5
 
+  rabbitmq:
+    container_name: trest-rabbitmq
+    image: rabbitmq:4.3.6-management
+    ports:
+      - "127.0.0.1:5666:5672"
+      - "127.0.0.1:15666:15672"
+      - "127.0.0.1:15692:15692"
+
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+
 volumes:
   postgres_data:
+  rabbitmq_data:

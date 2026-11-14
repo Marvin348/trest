@@ -1,4 +1,4 @@
-package integration
+package deployment_test
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 
 	deploymentv1 "example.com/trest/contracts/deployment/v1"
 	"example.com/trest/services/deployment-service/internal/deployment"
-	"example.com/trest/services/deployment-service/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -59,7 +58,7 @@ type savedOutboxMessage struct {
 }
 
 func TestCreateDeployment(t *testing.T) {
-	testutil.ResetDB(t, testDB)
+	resetTestDB(t)
 	client := startTestGRPCServer(t)
 	request := validCreateDeploymentRequest()
 
@@ -159,7 +158,7 @@ func TestCreateDeploymentAcceptsBoundaryValues(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			testutil.ResetDB(t, testDB)
+			resetTestDB(t)
 			client := startTestGRPCServer(t)
 			request := validCreateDeploymentRequest()
 			testCase.change(request)
@@ -337,7 +336,7 @@ func TestCreateDeploymentRejectsInvalidRequest(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			testutil.ResetDB(t, testDB)
+			resetTestDB(t)
 			client := startTestGRPCServer(t)
 			request := validCreateDeploymentRequest()
 			testCase.change(request)
@@ -353,7 +352,7 @@ func TestCreateDeploymentRejectsInvalidRequest(t *testing.T) {
 }
 
 func TestCreateDeploymentIsIdempotent(t *testing.T) {
-	testutil.ResetDB(t, testDB)
+	resetTestDB(t)
 	client := startTestGRPCServer(t)
 	request := validCreateDeploymentRequest()
 
@@ -429,7 +428,7 @@ func TestCreateDeploymentRejectsIdempotencyConflict(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			testutil.ResetDB(t, testDB)
+			resetTestDB(t)
 			client := startTestGRPCServer(t)
 			firstRequest := validCreateDeploymentRequest()
 			conflictingRequest := validCreateDeploymentRequest()
@@ -458,7 +457,7 @@ func TestCreateDeploymentRejectsIdempotencyConflict(t *testing.T) {
 }
 
 func TestCreateDeploymentCreatesIndependentDeployments(t *testing.T) {
-	testutil.ResetDB(t, testDB)
+	resetTestDB(t)
 	client := startTestGRPCServer(t)
 	firstRequest := validCreateDeploymentRequest()
 	secondRequest := validCreateDeploymentRequest()
@@ -474,7 +473,7 @@ func TestCreateDeploymentCreatesIndependentDeployments(t *testing.T) {
 }
 
 func TestCreateDeploymentHandlesConcurrentIdenticalRequests(t *testing.T) {
-	testutil.ResetDB(t, testDB)
+	resetTestDB(t)
 	client := startTestGRPCServer(t)
 	request := validCreateDeploymentRequest()
 
@@ -508,7 +507,7 @@ func TestCreateDeploymentHandlesConcurrentIdenticalRequests(t *testing.T) {
 }
 
 func TestCreateDeploymentHandlesConcurrentConflictingRequests(t *testing.T) {
-	testutil.ResetDB(t, testDB)
+	resetTestDB(t)
 	client := startTestGRPCServer(t)
 	requests := []*deploymentv1.CreateDeploymentRequest{
 		validCreateDeploymentRequest(),
@@ -565,7 +564,7 @@ func TestCreateDeploymentHandlesConcurrentConflictingRequests(t *testing.T) {
 func TestCreateDeploymentRollsBackEventAndIdempotencyClaimWhenProjectionFails(
 	t *testing.T,
 ) {
-	testutil.ResetDB(t, testDB)
+	resetTestDB(t)
 
 	const (
 		constraintName = "chk_deployments_integration_forced_failure"
@@ -600,7 +599,7 @@ func TestCreateDeploymentRollsBackEventAndIdempotencyClaimWhenProjectionFails(
 }
 
 func TestCreateDeploymentRollsBackTransactionWhenOutboxInsertFails(t *testing.T) {
-	testutil.ResetDB(t, testDB)
+	resetTestDB(t)
 
 	const constraintName = "chk_outbox_integration_forced_failure"
 	_, err := testDB.Exec(

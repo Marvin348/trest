@@ -132,6 +132,10 @@ func (s *Service) Create(ctx context.Context,
 		return Deployment{}, fmt.Errorf("insert outbox message: %w", err)
 	}
 
+	if err := s.outboxRepo.Notify(ctx, tx); err != nil {
+		return Deployment{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return Deployment{}, fmt.Errorf("commit transaction: %w", err)
 	}

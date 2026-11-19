@@ -159,3 +159,23 @@ func (r *Repository) GetByID(ctx context.Context,
 
 	return deployment, nil
 }
+
+func (r *Repository) UpdateStatus(ctx context.Context,
+	tx pgx.Tx, deploymentID uuid.UUID, status string) error {
+	const query = `
+			UPDATE deployments
+			SET status = $1, updated_at = NOW()
+			WHERE id = $2
+		`
+
+	tag, err := tx.Exec(ctx, query, status, deploymentID)
+	if err != nil {
+		return fmt.Errorf("update deployment status: %w", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}

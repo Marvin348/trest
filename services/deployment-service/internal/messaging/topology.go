@@ -10,6 +10,9 @@ const (
 	DeploymentQueue      = "trest.deployments.requests"
 	DeploymentRoutingKey = "deployment.requested"
 
+	DeploymentRetryQueue      = "trest.deployments.retry"
+	DeploymentRetryRoutingKey = "deployment.retry"
+
 	DeploymentDLX          = "trest.deployments.dlx"
 	DeploymentDLQ          = "trest.deployments.dlq"
 	DeploymentDLRoutingKey = "deployment.dead"
@@ -63,6 +66,27 @@ func DeclareTopology(ch *amqp.Channel) error {
 		false, nil,
 	); err != nil {
 		return fmt.Errorf("bind deployment queue: %w", err)
+	}
+
+	if _, err := ch.QueueDeclare(
+		DeploymentRetryQueue,
+		true, false, false, false,
+		amqp.Table{
+			"x-message-ttl":             int32(5000),
+			"x-dead-letter-exchange":    DeploymentExchange,
+			"x-dead-letter-routing-key": DeploymentRoutingKey,
+		},
+	); err != nil {
+		return fmt.Errorf("declare deployment retry queue: %w", err)
+	}
+
+	if err := ch.QueueBind(
+		DeploymentRetryQueue,
+		DeploymentRetryRoutingKey,
+		DeploymentExchange,
+		false, nil,
+	); err != nil {
+		return fmt.Errorf("bind deployment retry queue: %w", err)
 	}
 
 	return nil

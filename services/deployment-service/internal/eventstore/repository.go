@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"uuid"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -56,4 +57,47 @@ func (r *Repository) Append(
 	}
 
 	return nil
+}
+
+func (r *Repository) GetByDeploymentID(ctx context.Context,
+	deploymentID uuid.UUID) ([]Event, error) {
+	const query = `
+			SELECT *
+			FROM deployment_events
+			WHERE deployment_id = $1
+			ORDER BY version ASC
+		`
+
+	rows, err := r.db.Query(ctx, query, deploymentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events by deployment id: %w", err)
+	}
+	defer rows.Close()
+
+	var events []Event
+
+	for rows.Next() {
+		var event Event
+
+		err := rows.Scan(
+			&event.ID,
+			&event.DeploymentID,
+			&event.Version,
+			&event.Type,
+			&event.SchemaVersion,
+			&event.Payload,
+			&event.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan event: %w", err)
+		}
+
+		events = append(events, event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over event rows: %w", err)
+	}
+
+	return events, nil
 }

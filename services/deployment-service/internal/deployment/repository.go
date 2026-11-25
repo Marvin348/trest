@@ -179,3 +179,36 @@ func (r *Repository) UpdateStatus(ctx context.Context,
 
 	return nil
 }
+
+func (r *Repository) ListRunningIDs(ctx context.Context) ([]uuid.UUID, error) {
+	const query = `
+		SELECT id
+		FROM deployments
+		WHERE status = 'RUNNING'
+		AND updated_at < NOW() - INTERVAL '5 minutes'
+		ORDER BY updated_at ASC
+		`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query running deployment ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan deployment id: %w", err)
+		}
+
+		ids = append(ids, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate running deployment ids: %w", err)
+	}
+
+	return ids, nil
+}

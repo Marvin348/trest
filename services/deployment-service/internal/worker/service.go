@@ -3,26 +3,40 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"example.com/trest/services/deployment-service/internal/deployment"
 	"example.com/trest/services/deployment-service/internal/eventstore"
+	"example.com/trest/services/deployment-service/internal/kubernetes"
 	"github.com/jackc/pgx/v5/pgxpool"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type DeploymentExecutor interface {
+	Deploy(
+		ctx context.Context,
+		message deployment.DeploymentRequestedMessage,
+	) error
+}
+
 type Service struct {
-	eventRepo      *eventstore.Repository
-	deploymentRepo *deployment.Repository
-	db             *pgxpool.Pool
+	eventRepo        *eventstore.Repository
+	deploymentRepo   *deployment.Repository
+	db               *pgxpool.Pool
+	executor         DeploymentExecutor
 }
 
 func NewService(eventRepo *eventstore.Repository,
 	deploymentRepo *deployment.Repository,
-	db *pgxpool.Pool) *Service {
+	db *pgxpool.Pool,
+	executor DeploymentExecutor) *Service {
 	return &Service{
-		eventRepo:      eventRepo,
-		deploymentRepo: deploymentRepo,
-		db:             db,
+		eventRepo:        eventRepo,
+		deploymentRepo:   deploymentRepo,
+		db:               db,
+		executor:         executor,
 	}
 }
 
@@ -46,9 +60,7 @@ func (s *Service) Process(ctx context.Context,
 			return err
 		}
 
-		// gets fixed in the next branch
 	case deployment.StatusRunning:
-		return fmt.Errorf("deployment already running")
 
 	case deployment.StatusSucceeded:
 		return nil
@@ -60,13 +72,17 @@ func (s *Service) Process(ctx context.Context,
 		return fmt.Errorf("unexpcted deployment status: %s", state.Status)
 	}
 
-	// Kubernetes
+	executionErr := s.executor.Deploy(ctx, message)
 
-	if err := s.finishDeployment(ctx, state, err); err != nil {
-		return err
+	if executionErr == nil {
+		return s.finishDeploymentSafely(ctx, state, nil)
 	}
 
-	return nil
+	if isPermanentDeploymentError(executionErr) {
+		return s.finishDeploymentSafely(ctx, state, executionErr)
+	}
+
+	return fmt.Errorf("execute kubernetes deployment: %w", executionErr)
 }
 
 func (s *Service) startDeployment(ctx context.Context,
@@ -116,12 +132,60 @@ func (s *Service) startDeployment(ctx context.Context,
 	return updatedState, nil
 }
 
+func (s *Service) finishDeploymentSafely(
+	ctx context.Context,
+	state deployment.State,
+	executionErr error,
+) error {
+	err := s.finishDeployment(ctx, state, executionErr)
+
+	if !errors.Is(err, eventstore.ErrConcurrencyConflict) {
+		return err
+	}
+
+	events, err := s.eventRepo.GetByDeploymentID(ctx, state.ID)
+	if err != nil {
+		return fmt.Errorf("reload deployment events: %w", err)
+	}
+
+	currentState, err := deployment.Rehydrate(events)
+	if err != nil {
+		return err
+	}
+
+	expectedStatus := deployment.StatusSucceeded
+	if executionErr != nil {
+		expectedStatus = deployment.StatusFailed
+	}
+
+	if currentState.Status == expectedStatus {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"deployment %s has unexpected status %s after concurrency conflict",
+		state.ID,
+		currentState.Status,
+	)
+}
+
 func (s *Service) finishDeployment(ctx context.Context,
 	state deployment.State, executionErr error) error {
 	eventType := deployment.DeploymentSucceeded
+	payload := json.RawMessage(`{}`)
 
 	if executionErr != nil {
 		eventType = deployment.DeploymentFailed
+
+		failedPayload, err := json.Marshal(deployment.DeploymentFailedPayload{
+			Reason:  deploymentFailureReason(executionErr),
+			Message: executionErr.Error(),
+		})
+		if err != nil {
+			return fmt.Errorf("marshal deployment failed payload: %w", err)
+		}
+
+		payload = failedPayload
 	}
 
 	finishedEvent := eventstore.Event{
@@ -129,7 +193,7 @@ func (s *Service) finishDeployment(ctx context.Context,
 		Type:          string(eventType),
 		Version:       state.Version + 1,
 		SchemaVersion: 1,
-		Payload:       json.RawMessage(`{}`),
+		Payload:       payload,
 	}
 
 	updatedState := state
@@ -163,4 +227,26 @@ func (s *Service) finishDeployment(ctx context.Context,
 	}
 
 	return nil
+}
+
+func deploymentFailureReason(err error) string {
+	switch {
+	case errors.Is(err, kubernetes.ErrDeploymentMismatch):
+		return "DeploymentMismatch"
+	case errors.Is(err, kubernetes.ErrSecretMismatch):
+		return "SecretMismatch"
+	}
+
+	reason := apierrors.ReasonForError(err)
+	if reason != metav1.StatusReasonUnknown {
+		return string(reason)
+	}
+
+	return "DeploymentExecutionFailed"
+}
+
+func isPermanentDeploymentError(err error) bool {
+	return errors.Is(err, kubernetes.ErrDeploymentMismatch) ||
+		errors.Is(err, kubernetes.ErrSecretMismatch) ||
+		apierrors.IsInvalid(err)
 }

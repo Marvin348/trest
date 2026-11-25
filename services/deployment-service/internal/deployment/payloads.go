@@ -27,7 +27,10 @@ type DeploymentStartedPayload struct{}
 
 type DeploymentSucceededPayload struct{}
 
-type DeploymentFailedPayload struct{}
+type DeploymentFailedPayload struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
 
 func newDeploymentCreatedPayload(
 	params CreateDeploymentParams,

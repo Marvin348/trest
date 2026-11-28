@@ -18,3 +18,7 @@ coverage/
 # Local Go diagnostics
 /diagnose.work
 /diagnose.work.sum
+
+# Locale Kubernetes-Konfiguration
+local/
+*kubeconfig*

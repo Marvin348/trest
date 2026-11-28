@@ -1,4 +1,105 @@
 services:
+  project-service:
+    build:
+      context: .
+      dockerfile: services/project-service/Dockerfile
+
+    container_name: trest-project-service
+    image: trest/project-service
+
+    env_file:
+      - ./services/project-service/.env
+
+    environment:
+      DATABASE_URL: postgres://project_user:${PROJECT_DB_PASSWORD}@postgres:5432/projects_db
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  deployment-grpc:
+    build:
+      context: .
+      dockerfile: services/deployment-service/Dockerfile
+
+    image: trest/deployment-service
+    container_name: trest-deployment-grpc
+
+    command: ["/app/bin/grpc"]
+
+    env_file:
+      - ./services/deployment-service/.env
+
+    environment:
+      DATABASE_URL: postgres://deployment_user:${DEPLOYMENT_DB_PASSWORD}@postgres:5432/deployments_db
+      GRPC_PORT: "50051"
+      HTTP_PORT: "8090"
+
+    ports:
+      - "127.0.0.1:50051:50051"
+      - "127.0.0.1:8090:8090"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  deployment-publisher:
+    image: trest/deployment-service
+    container_name: trest-deployment-publisher
+
+    command: ["/app/bin/publisher"]
+
+    env_file:
+      - ./services/deployment-service/.env
+
+    environment:
+      DATABASE_URL: postgres://deployment_user:${DEPLOYMENT_DB_PASSWORD}@postgres:5432/deployments_db
+      RABBITMQ_URL: amqp://trest:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  deployment-worker:
+    image: trest/deployment-service
+    container_name: trest-deployment-worker
+
+    command: ["/app/bin/worker"]
+
+    volumes:
+      - ./local/kubeconfig-worker.yaml:/app/kubeconfig:ro
+
+    env_file:
+      - ./services/deployment-service/.env
+
+    environment:
+      DATABASE_URL: postgres://deployment_user:${DEPLOYMENT_DB_PASSWORD}@postgres:5432/deployments_db
+      RABBITMQ_URL: amqp://trest:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      KUBECONFIG: /app/kubeconfig
+
+    networks:
+      - default
+      - kind
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+    restart: unless-stopped
+
   postgres:
     container_name: trest-postgres
     image: postgres:17
@@ -38,6 +139,18 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
 
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   postgres_data:
   rabbitmq_data:
+
+networks:
+  kind:
+    external: true
+    name: kind

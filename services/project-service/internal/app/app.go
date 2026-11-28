@@ -39,7 +39,7 @@ func Run() error {
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	client, conn, err := deploymentgrpc.NewClient("localhost:50051")
+	client, conn, err := deploymentgrpc.NewClient("deployment-grpc:50051")
 	if err != nil {
 		return fmt.Errorf("create deployment grpc client: %w", err)
 	}
